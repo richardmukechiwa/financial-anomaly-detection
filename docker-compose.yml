@@ -19,7 +19,9 @@ services:
     ports:
       - "8000:8000"
     networks:
-      - backend
+      backend:
+        aliases:
+          - financial-anomaly-detection
 
 networks:
   backend:
