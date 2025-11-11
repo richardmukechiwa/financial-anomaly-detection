@@ -1,15 +1,4 @@
-version: "3.8"
-
 services:
-  fastapi:
-    build: .
-    container_name: financial-anomaly-detection
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./models:/app/models
-    restart: unless-stopped
-
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n
@@ -17,8 +6,21 @@ services:
       - "5678:5678"
     environment:
       - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
-    volumes:
-      - ./n8n-data:/home/node/.n8n
-    restart: unless-stopped
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=admin
+    networks:
+      - backend
+    depends_on:
+      - api
+
+  api:
+    build: .
+    container_name: financial-anomaly-detection
+    ports:
+      - "8000:8000"
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
