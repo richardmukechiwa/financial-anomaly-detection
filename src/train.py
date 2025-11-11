@@ -18,10 +18,13 @@ def main(csv_path, model_name='iforest_model_v1.pkl', contamination=0.01, random
     # Basic sanity check
     if df.empty:
         raise ValueError("Input CSV is empty")
+    
+    # Example preprocessing: drop timestamp if exists
+    df.drop(columns=['timestamp'], inplace=True, errors='ignore')
 
     # Define features used for the model. Edit to match your dataset.
-    numeric_cols = ['amount']                     # add more numeric features if available
-    categorical_cols = ['merchant_id', 'customer_id']  # low-cardinality preferred
+    numeric_cols = ['amount', 'merchant_id', 'customer_id', 'processed']                     # add more numeric features if available
+    categorical_cols = ['channel', 'location']  # low-cardinality preferred
 
     features = numeric_cols + categorical_cols
     X = df[features]

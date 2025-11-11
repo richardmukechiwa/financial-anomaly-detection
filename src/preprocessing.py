@@ -9,7 +9,7 @@ def build_pipeline(numeric_cols, categorical_cols):
         ('scaler', StandardScaler())
     ])
     cat_pipe = Pipeline([
-        ('ohe', OneHotEncoder(handle_unknown='ignore', sparse=False))
+        ('ohe', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
     ])
     preproc = ColumnTransformer([
         ('num', num_pipe, numeric_cols),
