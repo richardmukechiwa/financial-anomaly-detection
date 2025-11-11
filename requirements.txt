@@ -1,7 +1,8 @@
-scikit-learn>=1.2
+fastapi
+uvicorn[standard]
 pandas
+scikit-learn>=1.0
 joblib
+pydantic
 numpy
-matplotlib
-seaborn     
-plotly      
+ 
