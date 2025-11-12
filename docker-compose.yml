@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   # ---------------------------
   # n8n automation workflow
@@ -14,8 +16,16 @@ services:
     networks:
       - backend
     depends_on:
-      api:
-        condition: service_healthy
+      - api
+    entrypoint: >
+      sh -c "
+        echo 'Waiting for API to be ready...';
+        until curl -s http://financial-anomaly-detection:8000/health > /dev/null; do
+          sleep 2;
+        done;
+        echo 'API ready, starting n8n...';
+        exec n8n
+      "
 
   # ---------------------------
   # Financial Anomaly Detection API
