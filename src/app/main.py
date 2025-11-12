@@ -1,24 +1,14 @@
-# src/app/main.py
+# src/app/main.py (excerpt)
+import pandas as pd
+import mysql.connector
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict
 import os
 import joblib
-import pandas as pd
 import numpy as np
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
 app = FastAPI(title="Anomaly Scoring API")
-
-# ---------------------------
-# Static files / favicon
-# ---------------------------
-app.mount("/static", StaticFiles(directory="src/app/static"), name="static")
-
-@app.get("/favicon.ico")
-async def favicon():
-    return FileResponse("src/app/static/favicon.ico")
 
 # ---------------------------
 # Model loading
@@ -33,51 +23,76 @@ except Exception as e:
     raise RuntimeError(f"Failed to load model from {MODEL_PATH}: {e}")
 
 # ---------------------------
-# Request schemas
+# Request schema
 # ---------------------------
-class Transaction(BaseModel):
-    transaction_id: str
-    amount: float
-    merchant_id: str
-    customer_id: str
-    channel: str = None
-    location: str = None
-    processed: int = 0
-
 class BatchRequest(BaseModel):
-    transactions: List[Transaction]
+    transaction_ids: List[int]  # optional: fetch by IDs
 
 # ---------------------------
-# Health endpoint
+# MySQL connection helper
 # ---------------------------
-@app.get("/health")
-def health():
-    return {"status": "ok", "model_path": MODEL_PATH}
+def get_mysql_connection():
+    return mysql.connector.connect(
+        host=os.environ.get("MYSQL_HOST", "localhost"),
+        user=os.environ.get("MYSQL_USER", "root"),
+        password=os.environ.get("MYSQL_PASSWORD", ""),
+        database=os.environ.get("MYSQL_DB", "crm")
+    )
 
 # ---------------------------
 # Scoring endpoint
 # ---------------------------
 @app.post("/score")
 def score_batch(req: BatchRequest) -> Dict[str, List[Dict]]:
-    if not req.transactions:
-        raise HTTPException(status_code=400, detail="No transactions provided")
-
-    df = pd.DataFrame([t.dict() for t in req.transactions])
-
-    # Features expected by the pipeline (must match train.py)
-    expected_features = ['amount', 'merchant_id', 'customer_id', 'channel', 'location', 'processed']
-    missing = [f for f in expected_features if f not in df.columns]
-    if missing:
-        raise HTTPException(status_code=400, detail=f"Missing features: {missing}")
-
     try:
-        # Pass dataframe directly to trained pipeline
-        preds = model.predict(df[expected_features])       # -1 = anomaly, 1 = normal
+        conn = get_mysql_connection()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"MySQL connection error: {e}")
+
+    # Fetch transactions from MySQL
+    try:
+        ids_tuple = tuple(req.transaction_ids)
+        query = f"""
+        SELECT transaction_id, amount, merchant_id, customer_id, channel, location, processed
+        FROM transactions
+        WHERE transaction_id IN ({','.join(['%s']*len(ids_tuple))})
+        """
+        df = pd.read_sql(query, conn, params=ids_tuple)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"MySQL fetch error: {e}")
+    finally:
+        conn.close()
+
+    if df.empty:
+        raise HTTPException(status_code=404, detail="No transactions found")
+
+    # ---------------------------
+    # Type conversion
+    # ---------------------------
+    expected_types = {
+        'amount': float,
+        'merchant_id': str,
+        'customer_id': str,
+        'channel': str,
+        'location': str,
+        'processed': int
+    }
+
+    for col, typ in expected_types.items():
+        if col in df.columns:
+            df[col] = df[col].astype(typ)
+
+    # ---------------------------
+    # Model prediction
+    # ---------------------------
+    expected_features = list(expected_types.keys())
+    try:
+        preds = model.predict(df[expected_features])
         scores = model.decision_function(df[expected_features])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Scoring error: {e}")
 
-    # Scale scores to 0-1 (higher = more anomalous)
+    # Scale scores 0-1 (higher = more anomalous)
     inv = -np.asarray(scores)
     scaled = (inv - np.min(inv)) / np.ptp(inv) if np.ptp(inv) != 0 else np.zeros_like(inv)
 
@@ -88,7 +103,6 @@ def score_batch(req: BatchRequest) -> Dict[str, List[Dict]]:
         anomaly_score = float(scaled[i])
         reason = []
 
-        # Optional human-readable explanations
         if row['amount'] > df['amount'].mean() + 3 * df['amount'].std():
             reason.append("amount >> historical mean")
         if row['amount'] > 10000:
@@ -104,4 +118,3 @@ def score_batch(req: BatchRequest) -> Dict[str, List[Dict]]:
         })
 
     return {"results": results}
-

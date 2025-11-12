@@ -1,32 +1,4 @@
-version: "3.9"
-
 services:
-  # ---------------------------
-  # n8n automation workflow
-  # ---------------------------
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: n8n
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=admin
-    networks:
-      - backend
-    depends_on:
-      - api
-    entrypoint: >
-      sh -c "
-        echo 'Waiting for API to be ready...';
-        until curl -s http://financial-anomaly-detection:8000/health > /dev/null; do
-          sleep 2;
-        done;
-        echo 'API ready, starting n8n...';
-        exec n8n
-      "
-
   # ---------------------------
   # Financial Anomaly Detection API
   # ---------------------------
@@ -40,11 +12,29 @@ services:
         aliases:
           - financial-anomaly-detection
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 5s
       retries: 5
       timeout: 3s
       start_period: 5s
+
+  # ---------------------------
+  # n8n automation workflow
+  # ---------------------------
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=N8N_BASIC_AUTH_PASSWORD
+    networks:
+      - backend
+    depends_on:
+      api:
+        condition: service_healthy
 
 # ---------------------------
 # Shared network
