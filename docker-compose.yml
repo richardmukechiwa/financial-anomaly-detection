@@ -1,44 +1,69 @@
+version: "3.8"
+
+networks:
+  app_network:
+    driver: bridge
+
 services:
-  # ---------------------------
-  # Financial Anomaly Detection API
-  # ---------------------------
-  api:
-    build: .
+  mysql:
+    image: mysql:8
+    container_name: mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: frauddb
+    ports:
+      - "3306:3306"
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  financial-anomaly-detection:
+    build:
+      context: ./financial-anomaly-detection
     container_name: financial-anomaly-detection
+    restart: always
     ports:
       - "8000:8000"
     networks:
-      backend:
-        aliases:
-          - financial-anomaly-detection
+      - app_network
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      - DB_HOST=mysql
+      - DB_NAME=frauddb
+      - DB_USER=root
+      - DB_PASSWORD=root
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 5s
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-      timeout: 3s
-      start_period: 5s
 
-  # ---------------------------
-  # n8n automation workflow
-  # ---------------------------
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n
-    ports:
-      - "5678:5678"
+    restart: always
     environment:
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=N8N_BASIC_AUTH_PASSWORD
+      - N8N_BASIC_AUTH_PASSWORD=admin
+      - DB_TYPE=mysqldb
+      - DB_MYSQLDB_HOST=mysql
+      - DB_MYSQLDB_PORT=3306
+      - DB_MYSQLDB_DATABASE=frauddb
+      - DB_MYSQLDB_USER=root
+      - DB_MYSQLDB_PASSWORD=root
+      - GENERIC_TIMEZONE=Africa/Harare
+    ports:
+      - "5678:5678"
     networks:
-      - backend
+      - app_network
     depends_on:
-      api:
+      financial-anomaly-detection:
         condition: service_healthy
-
-# ---------------------------
-# Shared network
-# ---------------------------
-networks:
-  backend:
-    driver: bridge
