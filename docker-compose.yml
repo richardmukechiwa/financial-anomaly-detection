@@ -1,6 +1,7 @@
-
-
 services:
+  # ---------------------------
+  # n8n automation workflow
+  # ---------------------------
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n
@@ -16,6 +17,9 @@ services:
       api:
         condition: service_healthy
 
+  # ---------------------------
+  # Financial Anomaly Detection API
+  # ---------------------------
   api:
     build: .
     container_name: financial-anomaly-detection
@@ -26,12 +30,15 @@ services:
         aliases:
           - financial-anomaly-detection
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
       interval: 5s
       retries: 5
       timeout: 3s
       start_period: 5s
 
+# ---------------------------
+# Shared network
+# ---------------------------
 networks:
   backend:
     driver: bridge
