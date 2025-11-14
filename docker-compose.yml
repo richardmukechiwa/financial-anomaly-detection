@@ -1,69 +1,50 @@
-version: "3.8"
-
-networks:
-  app_network:
-    driver: bridge
+version: "3.9"
 
 services:
-  mysql:
-    image: mysql:8
-    container_name: mysql
+  python-scoring:
+    build:
+      context: ./python-scoring
+    container_name: python-scoring
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: frauddb
-    ports:
-      - "3306:3306"
-    networks:
-      - app_network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  financial-anomaly-detection:
-    build:
-      context: ./financial-anomaly-detection
-    container_name: financial-anomaly-detection
-    restart: always
+      MODEL_PATH: /app/models/iforest_model_v1.pkl
+      MODEL_VERSION: v1
+      DB_HOST: n8n-mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: password
+      DB_DATABASE: n8n_workflows
+      SCORE_THRESHOLD_HIGH: -0.3
+      SCORE_THRESHOLD_MED: -0.1
     ports:
       - "8000:8000"
+    volumes:
+      - ./models:/app/models
     networks:
-      - app_network
-    depends_on:
-      mysql:
-        condition: service_healthy
-    environment:
-      - DB_HOST=mysql
-      - DB_NAME=frauddb
-      - DB_USER=root
-      - DB_PASSWORD=root
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - n8n_network
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.118.1
     container_name: n8n
     restart: always
+    env_file: .env
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=admin
-      - DB_TYPE=mysqldb
-      - DB_MYSQLDB_HOST=mysql
-      - DB_MYSQLDB_PORT=3306
-      - DB_MYSQLDB_DATABASE=frauddb
-      - DB_MYSQLDB_USER=root
-      - DB_MYSQLDB_PASSWORD=root
-      - GENERIC_TIMEZONE=Africa/Harare
+      DB_TYPE: mysqldb
+      DB_MYSQLDB_HOST: n8n-mysql    # uses existing mysql container
+      DB_MYSQLDB_PORT: 3306
+      DB_MYSQLDB_DATABASE: n8n_workflows
+      DB_MYSQLDB_USER: root
+      DB_MYSQLDB_PASSWORD: password
     ports:
       - "5678:5678"
-    networks:
-      - app_network
+    volumes:
+      - ./n8n_data:/home/node/.n8n
     depends_on:
-      financial-anomaly-detection:
-        condition: service_healthy
+      - python-scoring
+    networks:
+      - n8n_network
+
+networks:
+  n8n_network:
+    driver: bridge
+

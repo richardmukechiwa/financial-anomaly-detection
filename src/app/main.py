@@ -10,13 +10,17 @@ app = FastAPI()
 
 # Define transaction schema
 class Transaction(BaseModel):
-    transaction_id: int
+    
     amount: float
-    merchant_id: int
-    customer_id: int
+    merchant_id: str
+    customer_id: str
     channel: str
     location: str
-    processed: int = 0
+    year: int
+    month: int  
+    day_of_week: int
+    hour: int
+    
 
 @app.get("/health")
 def health():
