@@ -19,12 +19,14 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./models:/app/models
+     
+      - ./python-scoring/models:/app/models
+
     networks:
       - n8n_network
 
   n8n:
-    image: n8nio/n8n:1.118.1
+    image: n8nio/n8n:1.119.1
     container_name: n8n
     restart: always
     env_file: .env
