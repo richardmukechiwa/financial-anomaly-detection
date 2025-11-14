@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, validator
 from typing import List, Optional, Dict, Any
 import joblib
 import pandas as pd
@@ -50,6 +50,14 @@ class TransactionIn(BaseModel):
             raise ValueError("amount must be non-negative")
         return v
 
+    def compute_time_features(self):
+        ts = pd.to_datetime(self.timestamp, utc=True)
+        self.year = ts.year
+        self.month = ts.month
+        self.day_of_week = ts.dayofweek
+        self.hour = ts.hour
+        return self
+
 class ScoreOut(BaseModel):
     transaction_id: str
     anomaly_score: float
@@ -75,17 +83,8 @@ def get_db_conn():
 # ----------------------
 # Feature helpers
 # ----------------------
-def extract_time_fields(tx: TransactionIn):
-    ts = pd.to_datetime(tx.timestamp, utc=True)
-    tx.year = tx.year or ts.year
-    tx.month = tx.month or ts.month
-    tx.day_of_week = tx.day_of_week or ts.dayofweek
-    tx.hour = tx.hour or ts.hour
-    return tx
-
 def prepare_features(tx: TransactionIn) -> pd.DataFrame:
-    tx = extract_time_fields(tx)
-    # Ensure IDs are strings
+    tx.compute_time_features()
     tx.customer_id = str(tx.customer_id)
     tx.merchant_id = str(tx.merchant_id)
     df = pd.DataFrame([{
