@@ -49,6 +49,12 @@ class TransactionIn(BaseModel):
         if v < 0:
             raise ValueError("amount must be non-negative")
         return v
+    
+    @validator("transaction_id")
+    def id_must_be_int(cls, v):
+        if not str(v).isdigit():
+            raise ValueError("transaction_id must be numeric")
+        return v
 
     def compute_time_features(self):
         ts = pd.to_datetime(self.timestamp, utc=True)
