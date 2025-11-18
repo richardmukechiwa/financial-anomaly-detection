@@ -12,10 +12,9 @@ COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY python_scoring/ python_scoring/
-
-WORKDIR /app/python_scoring
+# copy all files from the build context (python_scoring) into /app
+COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "python_scoring.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
