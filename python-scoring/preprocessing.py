@@ -1,10 +1,15 @@
-# src/preprocessing.py
+# preprocessing.py
 import pandas as pd
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
+from typing import List
 
-def build_pipeline(numeric_cols, categorical_cols):
+def build_pipeline(numeric_cols: List[str], categorical_cols: List[str]):
+    """
+    Returns a ColumnTransformer instance.
+    Ensure this returns the transformer object (not a tuple).
+    """
     num_pipe = Pipeline([
         ('scaler', StandardScaler())
     ])
