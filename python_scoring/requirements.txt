@@ -9,3 +9,4 @@ scikit-learn==1.7.2
 loguru==0.7.0
 mysql-connector-python==9.5.0
 python-dotenv==1.0.1
+tensorflow==2.13.0   # pin version if needed
