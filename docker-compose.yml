@@ -1,10 +1,10 @@
 version: "3.9"
 
 services:
-  python-scoring:
+  python_scoring:
     build:
-      context: ./python-scoring
-    container_name: python-scoring
+      context: ./python_scoring
+    container_name: python_scoring
     restart: always
     environment:
       MODEL_PATH: /app/models/iforest_model_v1.pkl
@@ -20,7 +20,7 @@ services:
       - "8000:8000"
     volumes:
      
-      - ./python-scoring/models:/app/models
+      - ./python_scoring/models:/app/models
 
     networks:
       - n8n_network
@@ -42,7 +42,7 @@ services:
     volumes:
       - ./n8n_data:/home/node/.n8n
     depends_on:
-      - python-scoring
+      - python_scoring
     networks:
       - n8n_network
 
