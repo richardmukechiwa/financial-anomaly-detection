@@ -2,6 +2,7 @@
     "cSpell.words": [
         "fastapi",
         "iforest",
+        "loguru",
         "preds",
         "preproc",
         "pydantic",
