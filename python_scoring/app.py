@@ -3,14 +3,14 @@ from pydantic import BaseModel, validator
 from typing import List, Optional, Dict, Any
 import joblib
 import pandas as pd
-from datetime import datetime
-from loguru import logger
-import os
 import numpy as np
+import os
+from loguru import logger
+from model_wrapper import EnsembleModel
 import mysql.connector
 
 # ----------------------
-# Environment variables
+# Environment
 # ----------------------
 MODEL_PATH = os.getenv("MODEL_PATH", "/app/models/ensemble_model_v1.pkl")
 MODEL_VERSION = os.getenv("MODEL_VERSION", "v1")
@@ -27,29 +27,32 @@ AMOUNT_HIGH_RISK = float(os.getenv("AMOUNT_HIGH_RISK", 10000.0))
 # Load ensemble
 # ----------------------
 try:
+    ensemble: EnsembleModel
     bundle = joblib.load(MODEL_PATH)
-    preproc = bundle["preproc"]
-    iforest = bundle["iforest"]
-    lof = bundle["lof"]
-    ae_path = bundle.get("autoencoder_path", None)
-    ae_threshold = bundle.get("ae_threshold", 1.0)
-    autoencoder = None
-    if ae_path and os.path.exists(ae_path):
+    ensemble = EnsembleModel(
+        preproc=bundle["preproc"],
+        iforest=bundle["iforest"],
+        lof=bundle["lof"],
+        autoencoder=bundle.get("autoencoder_path"),
+        ae_threshold=bundle.get("ae_threshold", 1.0)
+    )
+    # load autoencoder if path exists
+    if ensemble.autoencoder and os.path.exists(ensemble.autoencoder):
         import tensorflow as tf
-        autoencoder = tf.keras.models.load_model(ae_path)
-        logger.info("Loaded autoencoder from {}", ae_path)
-    logger.info("Ensemble bundle loaded from {}", MODEL_PATH)
+        ensemble.autoencoder = tf.keras.models.load_model(ensemble.autoencoder)
+        logger.info("Loaded autoencoder from {}", ensemble.autoencoder)
+    logger.info("Ensemble loaded from {}", MODEL_PATH)
 except Exception as e:
     logger.exception("Failed to load ensemble: {}", e)
     raise
 
 # ----------------------
-# App instance
+# App
 # ----------------------
 app = FastAPI(title="ML Scoring API", version=MODEL_VERSION)
 
 # ----------------------
-# Pydantic schemas
+# Schemas
 # ----------------------
 class TransactionIn(BaseModel):
     transaction_id: str
@@ -57,35 +60,32 @@ class TransactionIn(BaseModel):
     amount: float
     customer_id: str
     merchant_id: str
-    channel: Optional[str] = None
-    location: Optional[str] = None
-    year: Optional[int] = None
-    month: Optional[int] = None
-    day_of_week: Optional[int] = None
-    hour: Optional[int] = None
+    channel: Optional[str] = ""
+    location: Optional[str] = ""
     customer_avg_amount: Optional[float] = 0.0
     customer_frequency: Optional[float] = 0.0
     merchant_avg_amount: Optional[float] = 0.0
 
     @validator("amount")
-    def amount_must_be_positive(cls, v):
+    def amount_positive(cls, v):
         if v < 0:
             raise ValueError("amount must be non-negative")
         return v
 
     @validator("transaction_id")
-    def id_must_be_numeric(cls, v):
+    def id_numeric(cls, v):
         if not str(v).isdigit():
             raise ValueError("transaction_id must be numeric")
         return v
 
     def compute_time_features(self):
         ts = pd.to_datetime(self.timestamp, utc=True)
-        self.year = ts.year
-        self.month = ts.month
-        self.day_of_week = ts.dayofweek
-        self.hour = ts.hour
-        return self
+        return {
+            "year": ts.year,
+            "month": ts.month,
+            "day_of_week": ts.dayofweek,
+            "hour": ts.hour
+        }
 
 class ScoreOut(BaseModel):
     transaction_id: str
@@ -98,7 +98,7 @@ class ScoreOut(BaseModel):
     model_version: str
 
 # ----------------------
-# Database connection
+# DB connection
 # ----------------------
 def get_db_conn():
     return mysql.connector.connect(
@@ -117,7 +117,7 @@ def compute_profile_features(tx: TransactionIn) -> Dict[str, float]:
     try:
         conn = get_db_conn()
         cur = conn.cursor(dictionary=True)
-        # Customer history
+        # Customer
         cur.execute("""
             SELECT AVG(amount) AS cust_avg, COUNT(*)/90.0 AS cust_freq
             FROM transactions
@@ -126,7 +126,8 @@ def compute_profile_features(tx: TransactionIn) -> Dict[str, float]:
         row = cur.fetchone() or {}
         cust_avg = float(row.get("cust_avg") or 0.0)
         cust_freq = float(row.get("cust_freq") or 0.0)
-        # Merchant history
+
+        # Merchant
         cur.execute("""
             SELECT AVG(amount) AS merch_avg
             FROM transactions
@@ -134,8 +135,10 @@ def compute_profile_features(tx: TransactionIn) -> Dict[str, float]:
         """, (tx.merchant_id,))
         row2 = cur.fetchone() or {}
         merch_avg = float(row2.get("merch_avg") or 0.0)
+
         cur.close()
         conn.close()
+
         deviation = (tx.amount - cust_avg) / (cust_avg + 1e-9) if cust_avg > 0 else 0.0
         return {
             "customer_avg_amount": cust_avg,
@@ -150,35 +153,34 @@ def compute_profile_features(tx: TransactionIn) -> Dict[str, float]:
 # ----------------------
 # Rules
 # ----------------------
-def evaluate_rules(tx: TransactionIn) -> Dict[str, float]:
+def evaluate_rules(tx: TransactionIn, hour:int) -> float:
     score = 0.0
     if tx.amount > 1000:
         score += 0.6
-    if tx.channel and tx.channel.lower() == "card" and tx.location and tx.location.lower() not in ("harare","bulawayo"):
+    if tx.channel.lower() == "card" and tx.location.lower() not in ("harare","bulawayo"):
         score += 0.3
-    if tx.hour < 5:
+    if hour < 5:
         score += 0.2
-    return {"rule_score": min(score, 1.0)}
+    return min(score, 1.0)
 
 # ----------------------
-# Prepare features for ensemble
+# Prepare features
 # ----------------------
-def prepare_features(tx: TransactionIn) -> np.ndarray:
-    tx.compute_time_features()
+def prepare_features(tx: TransactionIn) -> pd.DataFrame:
+    time_feats = tx.compute_time_features()
     df = pd.DataFrame([{
         "amount": tx.amount,
-        "year": tx.year,
-        "month": tx.month,
-        "day_of_week": tx.day_of_week,
-        "hour": tx.hour,
+        "year": time_feats["year"],
+        "month": time_feats["month"],
+        "day_of_week": time_feats["day_of_week"],
+        "hour": time_feats["hour"],
         "cust_avg_amount": tx.customer_avg_amount,
         "cust_txn_count": tx.customer_frequency,
         "merch_avg_amount": tx.merchant_avg_amount,
-        "channel": tx.channel or "",
-        "location": tx.location or ""
+        "channel": tx.channel,
+        "location": tx.location
     }])
-    X = preproc.transform(df)
-    return np.asarray(X)
+    return df
 
 # ----------------------
 # Aggregate scores
@@ -188,7 +190,7 @@ def aggregate_scores(s_if, s_lof, s_ae, rule_score, tx_amount):
         return 1.0 / (1.0 + np.exp((x - center) / scale))
     norm_if = float(inv_sig(s_if))
     norm_lof = float(inv_sig(s_lof))
-    norm_ae = float(min(max(s_ae / (ae_threshold + 1e-9), 0.0), 1.0))
+    norm_ae = float(np.clip(s_ae / (ensemble.ae_threshold + 1e-9), 0.0, 1.0))
     agg = 0.4*norm_if + 0.3*norm_lof + 0.3*norm_ae + 0.45*rule_score
     if tx_amount >= AMOUNT_HIGH_RISK:
         agg = max(agg, 0.85)
@@ -201,15 +203,16 @@ def aggregate_scores(s_if, s_lof, s_ae, rule_score, tx_amount):
     return agg, lvl
 
 # ----------------------
-# Persist results
+# Persist
 # ----------------------
 def persist_score(tx: TransactionIn, payload: Dict[str, Any]):
     try:
         conn = get_db_conn()
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO anomalies_log (transaction_id, anomaly_score_iforest, anomaly_score_lof, anomaly_score_ae, rule_score, aggregated_score, risk_level, model_version, timestamp)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            INSERT INTO anomalies_log
+            (transaction_id, anomaly_score_iforest, anomaly_score_lof, anomaly_score_ae, rule_score, aggregated_score, risk_level, model_version, timestamp)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW())
         """, (
             tx.transaction_id,
             payload["anomaly_score_iforest"],
@@ -241,25 +244,20 @@ def score_single(tx: TransactionIn):
         tx.customer_frequency = prof["customer_frequency"]
         tx.merchant_avg_amount = prof["merchant_avg_amount"]
 
-        X = prepare_features(tx)
-        s_if = iforest.decision_function(X)[0]
-        try:
-            s_lof = lof._decision_function(X)[0]
-        except Exception:
-            s_lof = -lof.negative_outlier_factor_[0] if hasattr(lof, "negative_outlier_factor_") else 0.0
-        s_ae = 0.0
-        if autoencoder:
-            s_ae = float(np.mean(np.square(X - autoencoder.predict(X, verbose=0)), axis=1)[0])
+        df = prepare_features(tx)
+        s_if = ensemble.score_iforest(df)[0]
+        s_lof = ensemble.score_lof(df)[0]
+        s_ae = ensemble.score_autoencoder(df)[0] if ensemble.autoencoder else 0.0
 
-        rules = evaluate_rules(tx)
-        agg, lvl = aggregate_scores(s_if, s_lof, s_ae, rules["rule_score"], tx.amount)
+        rule_score = evaluate_rules(tx, df['hour'][0])
+        agg, lvl = aggregate_scores(s_if, s_lof, s_ae, rule_score, tx.amount)
 
         out = {
             "transaction_id": tx.transaction_id,
             "anomaly_score_iforest": s_if,
             "anomaly_score_lof": s_lof,
             "anomaly_score_ae": s_ae,
-            "rule_score": rules["rule_score"],
+            "rule_score": rule_score,
             "aggregated_score": agg,
             "risk_level": lvl,
             "model_version": MODEL_VERSION
