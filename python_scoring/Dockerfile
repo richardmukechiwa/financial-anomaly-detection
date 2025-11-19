@@ -6,12 +6,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements_api.txt .
-RUN pip install --no-cache-dir -r requirements_api.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy ML API code and models
 COPY app.py .
-COPY utils.py .
 COPY models ./models
 
 # Env
