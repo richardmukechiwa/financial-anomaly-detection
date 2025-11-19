@@ -1,22 +1,26 @@
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Copy requirements and install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# System deps (minimal)
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Copy application code
+# Install Python dependencies
+COPY requirements_api.txt .
+RUN pip install --no-cache-dir -r requirements_api.txt
+
+# Copy ML API code and models
 COPY app.py .
+COPY utils.py .
 COPY models ./models
 
-# Environment variables
+# Env
 ENV MODEL_PATH=/app/models/ensemble_model_v1.pkl
 ENV MODEL_VERSION=v1
+ENV SCORE_THRESHOLD_HIGH=-0.3
+ENV SCORE_THRESHOLD_MED=-0.1
+ENV AMOUNT_HIGH_RISK=10000.0
 
-# Expose FastAPI port
 EXPOSE 8000
 
-# Run FastAPI with uvicorn
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
