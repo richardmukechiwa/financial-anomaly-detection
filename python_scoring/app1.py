@@ -19,9 +19,25 @@ bundle = joblib.load(MODEL_PATH)
 preproc = bundle["preproc"]
 iforest = bundle["iforest"]
 lof = bundle["lof"]
-ae_path = bundle["autoencoder_path"]
+
+# Fix autoencoder path for container
+ae_path = bundle.get("autoencoder_path", None)
+if ae_path:
+    # Normalize to container path if it still has Windows separators
+    ae_path = ae_path.replace("\\", "/")
+    # Prepend /app/models if path is relative
+    if not ae_path.startswith("/"):
+        ae_path = os.path.join("/app/models", ae_path)
+    
+# Load autoencoder safely
+autoencoder = None
 ae_threshold = float(bundle.get("ae_threshold", 1.0))
-autoencoder = tf.keras.models.load_model(ae_path)
+if ae_path and os.path.exists(ae_path):
+    autoencoder = tf.keras.models.load_model(ae_path)
+    logger.info("Loaded autoencoder from {}", ae_path)
+else:
+    logger.warning("Autoencoder path not found, skipping autoencoder loading: {}", ae_path)
+
 logger.info("Loaded ML bundle from {}", MODEL_PATH)
 
 app = FastAPI(title="ML Scoring API", version=MODEL_VERSION)
@@ -59,7 +75,10 @@ def score_transaction(tx: TransactionIn):
             s_lof = lof._decision_function(X_arr)[0]
         except Exception:
             s_lof = -lof.negative_outlier_factor_[0] if hasattr(lof, "negative_outlier_factor_") else 0.0
-        s_ae = float(np.mean(np.square(X_arr - autoencoder.predict(X_arr, verbose=0)), axis=1)[0])
+
+        s_ae = 0.0
+        if autoencoder:
+            s_ae = float(np.mean(np.square(X_arr - autoencoder.predict(X_arr, verbose=0)), axis=1)[0])
 
         # normalize
         def inv_sig(x, center=SCORE_THRESHOLD_MED, scale=0.1):

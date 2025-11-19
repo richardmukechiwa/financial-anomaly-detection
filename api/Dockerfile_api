@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+COPY requirements_api.txt .
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements_api.txt
+
+COPY app.py .
+COPY utils.py .
+
+ENV DB_HOST=n8n-mysql \
+    DB_PORT=3306 \
+    DB_USER=root \
+    DB_PASSWORD=password \
+    DB_DATABASE=n8n_workflows \
+    ML_URL=http://ml:8001/predict \
+    ML_RETRY_ATTEMPTS=3 \
+    ML_RETRY_DELAY=2.0 \
+    MODEL_VERSION=v1
+
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
